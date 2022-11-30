@@ -1,0 +1,125 @@
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <cuda_fp16.h>
+#include <cuda_profiler_api.h>
+#include "THC/THC.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <torch/extension.h>
+#include <math.h>
+#include <vector>
+#include <stdio.h>
+
+typedef torch::Tensor Tensor;
+#define FULL_MASK 0xffffffff
+const int NUM_THREADS_PER_BLOCK = 1024;
+const int DIM_PER_THREAD = 16;
+const int HALF2_PER_THREAD = DIM_PER_THREAD / 2;
+const int INT4_PER_THREAD = DIM_PER_THREAD / 8;
+const float EPS = 0.1;
+
+
+__forceinline__ __device__ unsigned lane_id()
+{
+    unsigned ret;
+    asm volatile ("mov.u32 %0, %laneid;" : "=r"(ret));
+    return ret;
+}
+
+
+__forceinline__ __device__ __half clamp_eps(__half x) {
+    __half one = __float2half(EPS);
+    return __hgt(x, one) ? x : one;
+}
+
+
+__forceinline__ __device__ __half clamp(__half x) {
+    __half eps = __float2half(1e-3);
+    return __hgt(x, eps) ? x : eps;
+}
+
+
+__forceinline__ __device__ __half2 clamp(__half2 x) {
+    return __halves2half2(clamp(x.x), clamp(x.y));
+}
+
+
+__forceinline__ __device__ __half select_eps(__half x, __half a) {
+    const __half eps = __float2half(EPS);
+    return __hgt(a, eps) ? x : __float2half(0.f);
+}
+
+
+__forceinline__ __device__
+void read_int4(
+    const __half * __restrict__ x_local,
+    __half2 *x,
+    int count) {
+    #pragma unroll
+    for (int j = 0; j < count; ++ j) {
+        *((int4 *) x + j) = *((int4*) x_local + j);
+    }
+}
+
+
+__forceinline__ __device__
+void read_kv(
+    const __half * __restrict__ k_local,
+    const __half * __restrict__ v_local,
+    __half2 k_val[HALF2_PER_THREAD],
+    __half2 v_val[4]) {
+    #pragma unroll
+    for (int j = 0; j < INT4_PER_THREAD; ++ j) {
+        *((int4 *) k_val + j) = *((int4*) k_local + j);
+    }
+    *((int4 *) v_val) = *((int4*) v_local);
+}
+
+
+__forceinline__ __device__ void
+read_int4(int4 in0, __half2 val[4]) {
+    val[0] = *((__half2 *) &in0.x);
+    val[1] = *((__half2 *) &in0.y);
+    val[2] = *((__half2 *) &in0.z);
+    val[3] = *((__half2 *) &in0.w);
+}
+
+
+
+__forceinline__ __device__
+void read_sz(
+    const __half * __restrict__ s_local,
+    const __half * __restrict__ z_local,
+    __half2 s_val[HALF2_PER_THREAD],
+    __half2 z_val[HALF2_PER_THREAD]) {
+    #pragma unroll
+    for (int j = 0; j < INT4_PER_THREAD; ++ j) {
+        *((int4 *) s_val + j) = *((int4*) s_local + j);
+    }
+
+    #pragma unroll
+    for (int j = 0; j < INT4_PER_THREAD; ++ j) {
+        *((int4 *) z_val + j) = *((int4*) z_local + j);
+    }
+}
+
+
+__forceinline__ __device__
+void write_sz(
+    const __half * __restrict__ s_local,
+    const __half * __restrict__ z_local,
+    __half2 s_val[HALF2_PER_THREAD],
+    __half2 z_val[HALF2_PER_THREAD]) {
+    #pragma unroll
+    for (int j = 0; j < INT4_PER_THREAD; ++ j) {
+        *((int4 *) s_local + j) = *((int4*) s_val + j);
+    }
+
+    if (threadIdx.y == 0) {
+        #pragma unroll
+        for (int j = 0; j < INT4_PER_THREAD; ++ j) {
+            *((int4 *) z_local + j) = *((int4*) z_val + j);
+        }
+    }
+}
