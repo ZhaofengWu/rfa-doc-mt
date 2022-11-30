@@ -32,7 +32,7 @@ You can find scripts that processe these raw data into a form that fairseq can c
 
 # Pretrained Models
 
-You can find our pretrained models at https://huggingface.co/ZhaofengWu/rfa-doc-mt
+You can find our pretrained models at https://huggingface.co/ZhaofengWu/rfa-doc-mt-models
 
 # Evaluation
 
