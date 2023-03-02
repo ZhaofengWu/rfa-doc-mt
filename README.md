@@ -30,6 +30,8 @@ We downloaded the IWSLT (i.e. TED) data from https://wit3.fbk.eu/2015-01 and Ope
 
 You can find scripts that processe these raw data into a form that fairseq can consume in `scripts/*.sh`. `prepare_ted.sh` is for IWSLT, `prepare_processed_opensubtitles.sh` is for OpenSubtitles, and `prepare_consistency_sets.sh` adds the consistency data in https://github.com/lena-voita/good-translation-wrong-in-context into the OpenSubtitles data.
 
+For some these scripts, you may need to set `export PYTHONPATH="$(pwd):${PYTHONPATH}"` like in our `train_baseline.sh` script so that fairseq knows what the `doc_translation` task is.
+
 # Pretrained Models
 
 You can find our pretrained models at https://huggingface.co/ZhaofengWu/rfa-doc-mt-models
